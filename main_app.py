@@ -125,6 +125,7 @@ class App(tk.Tk):
         # Create quit button
         self.quit_button = ttk.Button(self, text="Quit", command=self.quit_app)
         self.quit_button.pack(side=tk.BOTTOM, anchor=tk.SE, padx=5, pady=5)
+        self.bind('<Return>', lambda event: self.login_submit())
 
     def login_submit(self):
         username = self.login_frame.username_entry.get()

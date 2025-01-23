@@ -10,9 +10,10 @@ class Contract:
     reduc2 = {"enable":False,"column":"","percentage":0}
     extra = {"enable":False,"amount":0}
     combinations = {"eb_lt":False,"eb_reduc":False,"eb_senior":False}
+    gd = {"enable":False,"column":"","amount":0}
     sbi = False
     
-    def __init__(self, contract_name, contract_sheet, activity, Senior=senior, EarlyBooking1=eb1, EarlyBooking2=eb2, LongTerm=lt, Reduction1=reduc1, Reduction2=reduc2, combinations=combinations, start_date=None, end_date=None, sbi=sbi):
+    def __init__(self, contract_name, contract_sheet, activity, Senior=senior, EarlyBooking1=eb1, EarlyBooking2=eb2, LongTerm=lt, Reduction1=reduc1, Reduction2=reduc2, combinations=combinations, GalaDinner=gd, start_date=None, end_date=None, sbi=sbi):
         
 
 
@@ -25,6 +26,7 @@ class Contract:
         self.Reduction1 = Reduction1
         self.Reduction2 = Reduction2
         self.combinations = combinations
+        self.GalaDinner = GalaDinner
         self.activity = activity
         self.sbi = sbi
         
@@ -39,6 +41,7 @@ class Contract:
                     "reduc1": Reduction1,
                     "reduc2": Reduction2,
                     "combinations": combinations,
+                    "gd": GalaDinner,
                     "activity": activity,
                     "sbi": sbi
                 }    
