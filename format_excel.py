@@ -22,6 +22,9 @@ class FormatExcel:
                         top=Side(style='thin'), 
                         bottom=Side(style='thin'))
 
+        border_top_bottom = Border(top=Side(style='thin'), 
+                        bottom=Side(style='thin'))
+
         # Write headers with borders and alignment
         for col_idx, col_name in enumerate(self.df.columns, start=1):
             cell = self.worksheet.cell(row=1, column=col_idx, value=col_name)
@@ -35,12 +38,29 @@ class FormatExcel:
                 cell = self.worksheet.cell(row=row_idx, column=col_idx, value=value)
                 cell.fill = fill
                 cell.alignment = Alignment(horizontal='center', vertical='center')
-                cell.border = border  # Apply border to data cells
-
-    
+                cell.border = border_top_bottom
+        
     def save_output_file(self):
         if os.path.exists(self.output_file_path):
             os.remove(self.output_file_path)
+
+        # Get the active worksheet
+        ws = self.workbook.active  
+
+        # Find the column index of "Booking No."
+        for col in ws.iter_cols(min_row=1, max_row=1):  
+            for cell in col:
+                if cell.value == "Booking No.":  # Find the correct column
+                    booking_no_col = cell.column
+                    break
+
+        # Format all cells in the "Booking No." column
+        for row in ws.iter_rows(min_row=2, min_col=booking_no_col, max_col=booking_no_col):
+            for cell in row:
+                if isinstance(cell.value, (int, float)):  # Ensure it's a number
+                    cell.number_format = '0'  # Ensures full integer display
+
+        # Save the workbook
         self.workbook.save(self.output_file_path)
         print(f"Saved at {self.output_file_path}")
 

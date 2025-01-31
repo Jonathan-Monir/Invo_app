@@ -1208,7 +1208,7 @@ class ApplySetup(ttk.Frame):
                     statment[col] = pd.to_datetime(statment[col]).dt.date  # Keeps only the date part
 
             # Now, call the function to create the new file# Columns to remove if they exist
-            columns_to_remove = {"senior", "longTerm", "Reduction1", "Reduction2", "earlyBooking1", "earlyBooking2, date_check, activity"}
+            columns_to_remove = {"senior", "longTerm", "Reduction1", "Reduction2", "earlyBooking1", "earlyBooking2", "date_check", "activity"}
             statment = statment.drop(columns=[col for col in columns_to_remove if col in statment], errors='ignore')
 
             # Reorder columns to place "Amount-hotel" and "Total price" just before "Difference"
@@ -1221,6 +1221,13 @@ class ApplySetup(ttk.Frame):
                 cols.insert(cols.index("Difference"), "Total price")   # Insert before "Difference"
 
             statment = statment[cols]
+            # Check if 'difference' column exists before modifying
+            if 'Difference' in statment.columns:
+                statment.loc[np.abs(statment['Difference']) < 0.5, 'Difference'] = 0
+
+            if "Booking No." in statment.columns:
+                statment['Booking No.'] = statment['Booking No.'].apply(lambda x: int(x))
+
             FormatExcel(statment, output_path)
 
 def get_tables():
