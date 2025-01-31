@@ -1,62 +1,89 @@
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
-import openpyxl
-import xlsxwriter
-from openpyxl.utils.dataframe import dataframe_to_rows
-
-
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
+import os
 
 class FormatExcel:
-    
-    def __init__(self, df, output_file_path=None, columns=None):
-        self.df = df.copy()  # Create a copy to avoid modifying the original DataFrame
+    def __init__(self, df, output_file_path="formatted_output.xlsx"):
+        self.df = df
         self.output_file_path = output_file_path
-        self.columns = columns
-        self.apply_format()
+        self.workbook = Workbook()
+        self.worksheet = self.workbook.active
+        self.write_dataframe_to_sheet()
+        self.change_colors()
+        self.change_font()
+        self.set_column_width()
+        self.save_output_file()
 
-    def apply_format(self):
-        if self.output_file_path:
-            writer = pd.ExcelWriter(self.output_file_path, engine='openpyxl')
-            self.df.to_excel(writer, sheet_name="Sheet1")
-            workbook = xlsxwriter.Workbook(self.output_file_path)
-            worksheet = workbook.add_worksheet()
-            writer.save()
-            
-            # self.color_difference()
-        
-    def color_difference(self):
-        
-        format3 = self.workbook.add_format({
-                'num_format': '0.00',
-                'bg_color': 'FFFF00',
-                'font_size': 15,   
-                'bold': True,
-                'font_name': 'Times New Roman',
-                'left': 6,
-                'right': 6,  # 1 means a solid border
-                'bottom': 2,
-                'align': 'center',
-                'valign': 'vcenter'
-            })
+    def write_dataframe_to_sheet(self):
+        # Define border style
+        border = Border(left=Side(style='thin'), 
+                        right=Side(style='thin'), 
+                        top=Side(style='thin'), 
+                        bottom=Side(style='thin'))
 
-        num_rows = self.df.shape[0]
-        num_cols = self.df.shape[1]
+        # Write headers with borders and alignment
+        for col_idx, col_name in enumerate(self.df.columns, start=1):
+            cell = self.worksheet.cell(row=1, column=col_idx, value=col_name)
+            cell.border = border  # Apply border to headers
+            cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        # for row in range(1, num_rows + 1):  # Loop through rows (skip header)
-        #     for col in range(num_cols):  # Loop through columns
-        #         cell = self.worksheet.cell(row=row, column=col + 1)  # Get cell
-        #         cell.font = openpyxl.styles.Font(bold=True, color='FF0000')
+        # Write DataFrame to worksheet
+        for row_idx, row in enumerate(self.df.itertuples(index=False), start=2):
+            fill = PatternFill(start_color='f0f0f0', end_color='f0f0f0', fill_type='solid') if row_idx % 2 == 0 else PatternFill()
+            for col_idx, value in enumerate(row, start=1):
+                cell = self.worksheet.cell(row=row_idx, column=col_idx, value=value)
+                cell.fill = fill
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = border  # Apply border to data cells
 
-        for row in range(num_rows):
-                for col in range(num_cols):
-                    cell_value = df.iat[row, col]
-                    if pd.notna(cell_value):  # Check if the cell contains any value
-                        self.worksheet.write(row, col, cell_value, format3)
+    
+    def save_output_file(self):
+        if os.path.exists(self.output_file_path):
+            os.remove(self.output_file_path)
+        self.workbook.save(self.output_file_path)
+        print(f"Saved at {self.output_file_path}")
 
-df = pd.read_excel(r"output\aBiblio- Resort 23-24.xlsx_output.xlsx")
+    def change_colors(self):
+        fill = PatternFill(start_color='ff4300', end_color='ff4300', fill_type='solid')
+        fill_first_row = PatternFill(start_color='ffff00', end_color='ffff00', fill_type='solid')
 
-# Specify the columns you want to highlight
-columns_to_highlight = ['Difference']
+        # Find "Difference" column index
+        amount_col_index = None
+        for col_idx, col_name in enumerate(self.df.columns, start=1):
+            if col_name == "Difference":
+                amount_col_index = col_idx
+                break
 
-FormatExcel(df, "output_file.xlsx", columns=columns_to_highlight)
+        if amount_col_index is not None:
+            for row_idx in range(2, len(self.df) + 2):
+                amount_cell = self.worksheet.cell(row=row_idx, column=amount_col_index)
+                if amount_cell.value != 0:
+                    amount_cell.fill = fill
+
+        # Change color of first row (headers)
+        for col_idx in range(1, len(self.df.columns) + 1):
+            cell = self.worksheet.cell(row=1, column=col_idx)
+            cell.fill = fill_first_row
+
+    def change_font(self):
+        font = Font(name='Calibri', size=14, bold=True, italic=False, color='000080')
+        for col_idx in range(1, len(self.df.columns) + 1):
+            cell = self.worksheet.cell(row=1, column=col_idx)
+            cell.font = font
+
+    def set_column_width(self):
+        for col_idx, col_name in enumerate(self.df.columns, start=1):
+            max_length = min(max(self.df[col_name].astype(str).apply(len).max(), len(col_name)),30) + 3
+            self.worksheet.column_dimensions[self.worksheet.cell(row=1, column=col_idx).column_letter].width = max_length
+
+if __name__ == "__main__":
+    # Example usage
+    data = {
+        "Name": ["Alice", "Bob", "Charlie"],
+        "Age": [25, 30, 35],
+        "Difference": [0, 10, -5]
+    }
+    df = pd.DataFrame(data)
+    formatter = FormatExcel(df, "formatted_output.xlsx")
+    print("Excel file formatted successfully!")

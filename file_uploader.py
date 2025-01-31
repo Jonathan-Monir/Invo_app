@@ -7,6 +7,13 @@ from contract import Contract
 import warnings
 import os
 
+# Suppress SettingWithCopyWarning
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
+warnings.filterwarnings("ignore", message="Setting an item of incompatible dtype")
+
+# Suppress UserWarnings related to openpyxl
+warnings.filterwarnings("ignore", message="Data Validation extension is not supported and will be removed", category=UserWarning)
 # Clear the terminal
 
 warnings.filterwarnings("ignore", message="A value is trying to be set on a copy of a slice from a DataFrame.*")
@@ -31,6 +38,8 @@ class FileUploader:
         return excel_data
 
     def fix_empty(self, df, column):
+        df['activity'] = 1
+
         # get df that has empty rows
         df.loc[(df[column].isnull() | (df[column] == '')),column] = np.nan
 
@@ -38,7 +47,11 @@ class FileUploader:
         empty_rows = df[column].isna()
         
         # set activity of rows to 0
+
         df.loc[empty_rows, "activity"] = 0
+        if len(df[df['activity'] == 0]) >= 1:
+            df['error_type'] = ""
+
         if "error_type" in df.columns:
             # type error in error type column
             if not df.loc[empty_rows, "error_type"].empty:
@@ -146,19 +159,44 @@ class FileUploader:
         
         return df
     
+    def find_header_row(self, df, keywords):
+        """
+        Find the row index in a DataFrame that contains all specified keywords.
+
+        Parameters:
+        df (DataFrame): The DataFrame to search.
+        keywords (list of str): Keywords to identify the header row.
+
+        Returns:
+        int: The index of the header row, or -1 if no row matches.
+        """
+        for i, row in df.iterrows():
+            if all(keyword in row.values for keyword in keywords):
+                return i
+        return -1
+
     def check_statment(self, statment):
 
         if "Arrival" not in statment.iloc[0] or "Departure" not in statment.iloc[0]:
+            # Define the keywords to identify the header row
+            header_keywords = ["Arrival", "Departure"]
+
+            # Find the header row dynamically
+            header_row_index = self.find_header_row(statment, header_keywords)
 
             # Identify the row where the column names are located
-            header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
-
+            if header_row_index != -1:
+                # Reload the data with the located header row
+                #header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
+                statment = pd.read_excel(self.filepath, sheet_name="statment", header=header_row_index+1)
             # Use the identified row as the header
-            statment.columns = statment.iloc[header_row]
-            statment = statment.drop(header_row)
+            #header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
+            #statment.columns = statment.iloc[header_row]
+            #statment = statment.drop(header_row)
 
             # Drop the null rows and reset the index
-            statment = statment.dropna().reset_index(drop=True)
+            #statment = statment.dropna().reset_index(drop=True)
+        
         
         statment = self.fix_empty(statment, "Rate code")
 
@@ -242,6 +280,7 @@ class FileUploader:
 
     
 if __name__ == "__main__":
-    file = FileUploader(r"test files\Biblio- Resort 23-24 . Invo.xlsx")
+    file = FileUploader(r"test files\siva_errors.xlsx")
     statment, contracts_sheets, contracts_activity = file.fix_file()
-    print(statment)
+    print(statment["error_type"])
+

@@ -18,12 +18,15 @@ from pandastable import Table  # Library for displaying pandas DataFrames in Tki
 import numpy as np  # Numerical operations library
 import warnings  # For suppressing warnings
 
+from format_excel import FormatExcel
 import tkinter as tk
 from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 import sqlite3
 import pandas as pd
 from pathlib import Path
+from tabulate import tabulate
+
 
 # Global configurations and warnings suppression
 warnings.filterwarnings("ignore", message="A value is trying to be set on a copy of a slice from a DataFrame.*")
@@ -119,8 +122,13 @@ class ExcelFileBrowserApp:
 
         # Initialize FileUploader instances for the selected files
         global container
-        container = [FileUploader(file_path) for file_path in self.files]
-        print(len(container), "files successfully loaded.")
+        try:
+            container = [FileUploader(file_path) for file_path in self.files]
+            #print(len(container), "files successfully loaded.")
+        except Exception as e:
+            messagebox.showerror("Error", "Failed to initialize FileUploader instances for selected files, probably due to statment sheet missing")
+            print(e)
+            container = [FileUploader(file_path) for file_path in self.files]
 
     def remove_selected_files(self):
         """Remove selected files from the list."""
@@ -1096,6 +1104,29 @@ class ApplySetup(ttk.Frame):
             self.submit_button = tk.Button(self, text="Submit", command=self.submit)
             self.submit_button.grid(columnspan=2, pady=10)
 
+    def format_table_data(self, table_data):
+        # Calculate the maximum width for each column
+        column_widths = {
+            col: max(len(str(col)), max(table_data[col].astype(str).map(len)))
+            for col in table_data.columns
+        }
+        
+        # Format headers (centered)
+        headers = "  ".join(
+            f"{col:^{column_widths[col]}}" for col in table_data.columns
+        )
+        
+        # Format rows (centered)
+        rows = "\n".join(
+            "    ".join(
+                f"{str(value):^{column_widths[col]}}" for col, value in row.items()
+            )
+            for row in table_data.to_dict(orient="records")
+        )
+        
+        # Combine headers and rows
+        return f"{headers}\n{rows}"
+
     def submit(self):
         for file, setup in self.setup_box.items():
 
@@ -1138,7 +1169,16 @@ class ApplySetup(ttk.Frame):
                     
                 result = ""
                 for table_name, table_data in prices.items():
-                    result += f"{table_name}:\n{table_data.to_string(index=False)}\n\n"
+                    # Convert to datetime if necessary
+                    table_data['first date'] = pd.to_datetime(table_data['first date'])
+                    table_data['second date'] = pd.to_datetime(table_data['second date'])
+
+                    # Format to only show date
+                    table_data['first date'] = table_data['first date'].dt.date
+                    table_data['second date'] = table_data['second date'].dt.date
+
+                    formatted_table = self.format_table_data(table_data)
+                    result += f"{table_name}:\n{formatted_table}\n\n"
                     
                 statment.loc[date, "calculations"] = result
                 
@@ -1152,7 +1192,36 @@ class ApplySetup(ttk.Frame):
             # # Drop the selected columns, creating a new DataFrame
             # statment_filtered = statment.drop(columns=list(set(cols_to_drop) - set(columns_to_keep)), inplace=True)
 
-            statment.to_excel(output_file_path, index=False)
+            #statment.to_excel(output_file_path, index=False)
+            filename_without_ext = os.path.splitext(file.filename)[0]
+            output_path = f"output/{filename_without_ext}_output.xlsx"
+
+            # Check if the file exists and delete it
+            if os.path.exists(output_path):
+                os.remove(output_path)
+                print(f"Old file '{output_path}' deleted.")
+
+            columns_to_check = ["Res_date", "Arrival", "Departure", "date_check"]
+
+            for col in columns_to_check:
+                if col in statment.columns:
+                    statment[col] = pd.to_datetime(statment[col]).dt.date  # Keeps only the date part
+
+            # Now, call the function to create the new file# Columns to remove if they exist
+            columns_to_remove = {"senior", "longTerm", "Reduction1", "Reduction2", "earlyBooking1", "earlyBooking2, date_check, activity"}
+            statment = statment.drop(columns=[col for col in columns_to_remove if col in statment], errors='ignore')
+
+            # Reorder columns to place "Amount-hotel" and "Total price" just before "Difference"
+            cols = list(statment.columns)
+
+            if "Amount-hotel" in cols and "Total price" in cols and "Difference" in cols:
+                cols.remove("Amount-hotel")
+                cols.remove("Total price")
+                cols.insert(cols.index("Difference"), "Amount-hotel")  # Insert before "Difference"
+                cols.insert(cols.index("Difference"), "Total price")   # Insert before "Difference"
+
+            statment = statment[cols]
+            FormatExcel(statment, output_path)
 
 def get_tables():
     db_file = 'setups.db'

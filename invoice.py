@@ -55,7 +55,6 @@ class Invoice:
             date_range.loc[len(date_range)-1,"second date"] = date_range.loc[len(date_range)-1,"second date"]
 
             invoice["Arrival"] = last_date + timedelta(days=1)
-            invoice["Departure"] = invoice["Departure"] + timedelta(days=1)
             #invoice["Departure"] = invoice["Departure"] + timedelta(days=1)
 
             
@@ -178,14 +177,15 @@ class Invoice:
 
     def invoicesMetrics(self):
         index_price_dict = {}
+        gd_dict = {}
         Index_contract_date_range_dict = {}
         for index, invoice in self.statment.iterrows():
             contract_date_range_dict = {}
             rate_code = invoice["Rate code"]
             date_range = pd.DataFrame(columns=["first date","second date",])
             real_arr = invoice["Arrival"]
-            invoice["Departure"] = invoice["Departure"] - timedelta(days=1) if not(invoice["Departure"] - timedelta(days=1) == invoice["Arrival"]) else invoice["Departure"]
             real_dep = invoice["Departure"]
+            invoice["Departure"] = invoice["Departure"] - timedelta(days=1) if not(invoice["Departure"] - timedelta(days=1) == invoice["Arrival"]) else invoice["Departure"]
             
             if self.statment.loc[index,"activity"]:
                 self.statment.loc[index,"error_type"]
@@ -275,16 +275,17 @@ class Invoice:
             if (real_dep - timedelta(days=1) == real_arr):
                 index_price_dict[index] = next(iter(Index_contract_date_range_dict[index].values()))[rate_code][0] 
             
-            for df in Index_contract_date_range_dict[index].values():
-                gd_dict = {}
-                target_date = pd.Timestamp("2024-12-31")
-                filtered_df = df[(df["first date"] <= target_date) & (df["second date"] >= target_date)]
-                if filtered_df.empty:
-                    pass
-                else:
-                    gd_dict[index] = filtered_df["gd"]
+            if index in Index_contract_date_range_dict:
+                for df in Index_contract_date_range_dict[index].values():
+                    target_date = pd.Timestamp("2024-12-31")
+                    filtered_df = df[(df["first date"] <= target_date) & (df["second date"] >= target_date)]
+                    if filtered_df.empty:
+                        pass
+                    else:
+                        gd_dict[index] = filtered_df["gd"].iloc[0]
+                    break
 
-                break
+
                     
             # gd adder
             #index_price_dict[index] += next(iter(Index_contract_date_range_dict[index].values()))["gd"][0] 
@@ -292,6 +293,7 @@ class Invoice:
         for index, index_price in gd_dict.items():
             index_price_dict[index] += index_price
 
+        #print(index_price_dict)
         return index_price_dict, Index_contract_date_range_dict, self.statment
 
 
@@ -303,18 +305,22 @@ if __name__ == "__main__":
     # Contract
     # FileUploader
     is_offer_dict = True
-    file = FileUploader(r"test files\galadinner2.xlsx")
+    file = FileUploader(r"test files\Biblio SIVAGOLDEN   Nov. Invo - Copy.xlsx")
     contract_sheets = file.contracts_sheets
 
     if is_offer_dict:
         offers_dict = {}
-        values = get_offer_contract_data("alnabilagd2")
+        values = get_offer_contract_data("bib_nabila_25")
         for contract_name, contract_data in file.contracts_sheets.items():
             offers_dict[contract_name] = Contract(contract_name,contract_data,file.contracts_activity[contract_name],values[contract_name]["senior"],values[contract_name]["earlyBooking1"],values[contract_name]["earlyBooking2"],values[contract_name]["longTerm"],values[contract_name]["reduction1"],values[contract_name]["reduction2"],values[contract_name]["combinations"], values[contract_name]["gd"],values[contract_name]["start_date"],values[contract_name]["end_date"])
 
-        invoice_m = Invoice(file, offers_dict).metrices
+        invo = Invoice(file, offers_dict)
+        invoice_m = invo.metrices
+        invo_price = invo.prices
     else:
-        invoice_m = Invoice(file).metrices
+        invo = Invoice(file)
+        invoice_m = invo.metrices
+        invo_price = invo.prices
     invoice_dict = invoice_m[0]
 
     # Example DataFrame
@@ -325,5 +331,6 @@ if __name__ == "__main__":
         invoice_df["diff-hotel"].iloc[key] = invoice_df["Amount-hotel"].iloc[key] - value
 
     # Printing the updated DataFrame
-    print(invoice_df["diff-hotel"])
+    print(invoice_df[invoice_df["diff-hotel"]>0])
+    #print(invo_price)
 
