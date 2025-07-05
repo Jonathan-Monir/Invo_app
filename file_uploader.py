@@ -211,6 +211,8 @@ class FileUploader:
         # columns_numeric_to_fix = ["Amount-hotel","Currency rate","Departure"]
         # statment = self.fix_numbers(statment, columns_numeric_to_fix)
         
+        # Final cleanup: drop any row missing Arrival or Departure
+        statment.dropna(subset=["Arrival", "Departure"], inplace=True)
         return self.initialize_offers(statment)
 
     def check_contract(self, sheets):
@@ -280,7 +282,7 @@ class FileUploader:
 
     
 if __name__ == "__main__":
-    file = FileUploader(r"test files\siva_errors.xlsx")
+    file = FileUploader(r"test files\Biblio- Grand 25.Invo.xlsx")
     statment, contracts_sheets, contracts_activity = file.fix_file()
-    print(statment["error_type"])
+    print(statment)
 

@@ -195,8 +195,6 @@ class Invoice:
                         if (invoice["Departure"]-invoice["Arrival"]).days == 0:
                             break
                         self.contract_name = contract_name
-                        print(invoice["Res_date"])
-                        print(contract_object.start_date)
                         if invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date:
                             
                             # contract not active

@@ -1368,6 +1368,16 @@ class DifferenceTable(ttk.Frame):
     def __init__(self,parent, statment, filename):
         super().__init__(parent)
 
+        # Make a copy to avoid modifying the original dataframe
+        statment = statment.copy()
+
+        # Format 'Invoice No.' as integer if present
+        if "Invoice No." in statment.columns:
+            statment["Invoice No."] = statment["Invoice No."].astype("Int64")
+
+        # Format 'Difference' column to avoid scientific notation
+        if "Difference" in statment.columns:
+            statment["Difference"] = statment["Difference"].apply(lambda x: f"{x:.2f}")
         columns_to_review = ["Amount-hotel","Total price","Difference"]
         if "Invoice No." in statment:
             columns_to_review.append("Invoice No.")
@@ -1375,7 +1385,7 @@ class DifferenceTable(ttk.Frame):
         elif "Folio" in statment:
             columns_to_review.append("Folio")
 
-        difference_table = statment[statment['Difference'] != 0][columns_to_review]
+        difference_table = statment[statment['Difference'] != "0.00"][columns_to_review]
         
         tk.Label(self, text=filename, font=("Helvetica", 10, "underline"))
         
