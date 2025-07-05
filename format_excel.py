@@ -44,21 +44,24 @@ class FormatExcel:
         if os.path.exists(self.output_file_path):
             os.remove(self.output_file_path)
 
-        # Get the active worksheet
-        ws = self.workbook.active  
+        ws = self.workbook.active
+        booking_no_col = None  # Initialize with None
 
-        # Find the column index of "Booking No."
-        for col in ws.iter_cols(min_row=1, max_row=1):  
+        # Try to find the "Booking No." column
+        for col in ws.iter_cols(min_row=1, max_row=1):
             for cell in col:
-                if cell.value == "Booking No.":  # Find the correct column
+                if cell.value == "Booking No.":
                     booking_no_col = cell.column
                     break
+            if booking_no_col is not None:
+                break  # Exit outer loop too if found
 
-        # Format all cells in the "Booking No." column
-        for row in ws.iter_rows(min_row=2, min_col=booking_no_col, max_col=booking_no_col):
-            for cell in row:
-                if isinstance(cell.value, (int, float)):  # Ensure it's a number
-                    cell.number_format = '0'  # Ensures full integer display
+        # Only apply formatting if the column exists
+        if booking_no_col is not None:
+            for row in ws.iter_rows(min_row=2, min_col=booking_no_col, max_col=booking_no_col):
+                for cell in row:
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '0'  # Force integer display
 
         # Save the workbook
         self.workbook.save(self.output_file_path)

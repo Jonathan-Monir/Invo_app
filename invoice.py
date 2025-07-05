@@ -195,6 +195,8 @@ class Invoice:
                         if (invoice["Departure"]-invoice["Arrival"]).days == 0:
                             break
                         self.contract_name = contract_name
+                        print(invoice["Res_date"])
+                        print(contract_object.start_date)
                         if invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date:
                             
                             # contract not active
@@ -305,12 +307,12 @@ if __name__ == "__main__":
     # Contract
     # FileUploader
     is_offer_dict = True
-    file = FileUploader(r"test files\Biblio SIVAGOLDEN   Nov. Invo - Copy.xlsx")
+    file = FileUploader(r"test files\EXIM UPDATE Invo 2025.xlsx")
     contract_sheets = file.contracts_sheets
 
     if is_offer_dict:
         offers_dict = {}
-        values = get_offer_contract_data("bib_nabila_25")
+        values = get_offer_contract_data("exim_update")
         for contract_name, contract_data in file.contracts_sheets.items():
             offers_dict[contract_name] = Contract(contract_name,contract_data,file.contracts_activity[contract_name],values[contract_name]["senior"],values[contract_name]["earlyBooking1"],values[contract_name]["earlyBooking2"],values[contract_name]["longTerm"],values[contract_name]["reduction1"],values[contract_name]["reduction2"],values[contract_name]["combinations"], values[contract_name]["gd"],values[contract_name]["start_date"],values[contract_name]["end_date"])
 
@@ -330,7 +332,10 @@ if __name__ == "__main__":
     for key, value in invoice_dict.items():
         invoice_df["diff-hotel"].iloc[key] = invoice_df["Amount-hotel"].iloc[key] - value
 
+    invoice_df.loc[invoice_df["diff-hotel"] < 0.1, "diff-hotel"] = 0
+
     # Printing the updated DataFrame
-    print(invoice_df[invoice_df["diff-hotel"]>0])
+#     print(invoice_df[invoice_df["diff-hotel"]>0])
+    print(invoice_df["diff-hotel"])
     #print(invo_price)
 
