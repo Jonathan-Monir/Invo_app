@@ -38,12 +38,16 @@ pd.set_option('display.colheader_justify', 'center')  # Center column headers in
 
 # Function to resolve resource paths for development and PyInstaller
 def resource_path(relative_path):
-    """Get absolute path to resource, works for development and PyInstaller."""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS2
-    except Exception:
-        base_path = os.path.abspath(".")
+    """Get absolute path to a resource, for both development and a packaged build.
+
+    In a PyInstaller build, data files (setups.db, output/) and assets (images/)
+    ship next to the executable so the SQLite DB and output folder stay writable;
+    everything is resolved against the app directory. In development they resolve
+    against this file's directory."""
+    if getattr(sys, "frozen", False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 # Global variable for setup name (if applicable)
@@ -56,7 +60,7 @@ class MainFrame(ttk.Frame):
         super().__init__(parent)
         
         # Load and resize the background image
-        image = Image.open(resource_path(r"images\bg.png"))
+        image = Image.open(resource_path("images/bg.png"))
         desired_width, desired_height = 600, 600
         image.thumbnail((desired_width, desired_height))
         photo = ImageTk.PhotoImage(image)
@@ -432,9 +436,9 @@ class ContractFrame(tk.Frame):
         """Load images for control buttons (Up/Down/Delete)."""
         if enable_images:
             image_paths = {
-                "Down": r"images\RD.png",
-                "Up": r"images\RU.png",
-                "Delete": r"images\Delete.png"
+                "Down": "images/RD.png",
+                "Up": "images/RU.png",
+                "Delete": "images/Delete.png"
             }
             self.control_images = {}
             for name, path in image_paths.items():
@@ -1386,9 +1390,14 @@ class DifferenceTable(ttk.Frame):
             columns_to_review.append("Folio")
 
         difference_table = statment[statment['Difference'] != "0.00"][columns_to_review]
-        
+
+        # pandastable's getlongestEntry does c.str.len().max(); a real NaN left in
+        # a column keeps that result as numpy.float64, which later blows up
+        # range(l+1). Fill NaNs and stringify so width measurement gets ints.
+        difference_table = difference_table.fillna("").astype(str)
+
         tk.Label(self, text=filename, font=("Helvetica", 10, "underline"))
-        
+
         # Create a Table object
         table = Table(self, dataframe=difference_table)
 

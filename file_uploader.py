@@ -9,7 +9,7 @@ import os
 
 # Suppress SettingWithCopyWarning
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
+warnings.filterwarnings("ignore", message=".*SettingWithCopyWarning.*")
 warnings.filterwarnings("ignore", message="Setting an item of incompatible dtype")
 
 # Suppress UserWarnings related to openpyxl
@@ -62,7 +62,42 @@ class FileUploader:
 
     def fix_date(self, df_date_fix, column):
         # Detect and parse date format dynamically
-        try_formats = ['%Y-%m-%d %H:%M:%S', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%m-%d-%Y', '%Y-%d-%m', '%d-%m-%Y']
+        try_formats = [
+            # plain YMD / DMY / MDY (full year)
+            "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+            "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",
+            "%m-%d-%Y", "%m/%d/%Y", "%m.%d.%Y",
+
+            # two-digit year variants
+            "%y-%m-%d", "%y/%m/%d", "%y.%m.%d",
+            "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
+            "%m-%d-%y", "%m/%d/%y", "%m.%d.%y",
+
+            # swapped Y/D order variants
+            "%Y-%d-%m", "%Y/%d/%m", "%Y.%d.%m",
+
+            # time (hours/min/sec/micro)
+            "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f",
+            "%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M:%S.%f",
+            "%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S.%f",
+            "%m-%d-%Y %H:%M", "%m-%d-%Y %H:%M:%S", "%m-%d-%Y %H:%M:%S.%f",
+
+            # AM/PM forms
+            "%d-%m-%Y %I:%M %p", "%d/%m/%Y %I:%M %p", "%Y-%m-%d %I:%M %p",
+            "%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p",
+
+            # ISO T separators and timezones
+            "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
+            "%Y-%m-%d %H:%M:%S%z", "%d/%m/%Y %H:%M:%S%z",
+
+            # month name variants
+            "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+            "%d %b %Y %H:%M:%S", "%d %B %Y %H:%M:%S",
+
+            # dotted forms with time
+            "%d.%m.%Y %H:%M:%S", "%m.%d.%Y %H:%M:%S"
+        ]
         df_date_fix["date_check"] = pd.NA
 
         def remove_dot(value):
@@ -282,7 +317,7 @@ class FileUploader:
 
     
 if __name__ == "__main__":
-    file = FileUploader(r"test files\Biblio- Grand 25.Invo.xlsx")
+    file = FileUploader("test files/EXIM Al kasr August 25 test.xlsx")
     statment, contracts_sheets, contracts_activity = file.fix_file()
     print(statment)
 

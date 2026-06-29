@@ -1,12 +1,22 @@
 import tkinter as tk
+import os
+import sys
 from tkinter import ttk
-from browse_frame import MainFrame, SetupContract, Apply
+from browse_frame import MainFrame, SetupContract, Apply, resource_path
 import warnings
 import pandas as pd
 
+# Work relative to the app directory so setups.db / images / output resolve next
+# to the executable in a packaged (PyInstaller) build, regardless of where the
+# exe was launched from (e.g. a desktop shortcut).
+if getattr(sys, "frozen", False):
+    os.chdir(os.path.dirname(sys.executable))
+else:
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # Suppress SettingWithCopyWarning
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
+warnings.filterwarnings("ignore", message=".*SettingWithCopyWarning.*")
 warnings.filterwarnings("ignore", message="Setting an item of incompatible dtype")
 
 # Suppress UserWarnings related to openpyxl
@@ -112,7 +122,10 @@ class App(tk.Tk):
         self.geometry("600x600")
         self.minsize(600, 600)
         # self.attributes('-fullscreen', True)
-        self.iconbitmap(r"images\logo.ico")
+        try:
+            self.iconbitmap(resource_path(os.path.join("images", "logo.ico")))
+        except Exception:
+            pass
 
         
         self.login_frame = LoginFrame(self)

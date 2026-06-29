@@ -97,7 +97,12 @@ class FormatExcel:
 
     def set_column_width(self):
         for col_idx, col_name in enumerate(self.df.columns, start=1):
-            max_length = min(max(self.df[col_name].astype(str).apply(len).max(), len(col_name)),30) + 3
+            # NaN survives .astype(str) as a real float in newer pandas, so
+            # .apply(len) blows up. Use vectorized .str.len() (NaN-safe) instead.
+            col_max = self.df[col_name].astype(str).str.len().max()
+            if pd.isna(col_max):
+                col_max = 0
+            max_length = min(max(int(col_max), len(col_name)), 30) + 3
             self.worksheet.column_dimensions[self.worksheet.cell(row=1, column=col_idx).column_letter].width = max_length
 
 if __name__ == "__main__":

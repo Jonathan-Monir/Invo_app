@@ -1,0 +1,15 @@
+# Build-time dependencies for packaging the INVO Windows .exe with PyInstaller.
+# Install on Windows with:  python -m pip install -r requirements-build.txt
+#
+# tkinter is part of the standard library (included with the python.org installer).
+# matplotlib is pulled in automatically as a dependency of pandastable.
+
+pandas
+numpy
+openpyxl
+pillow
+tkcalendar
+pandastable
+tabulate
+babel
+pyinstaller
