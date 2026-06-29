@@ -1,5 +1,4 @@
 import pandas as pd
-import sqlite3
 from contract import Contract
 from file_uploader import FileUploader
 from contract import Contract
@@ -54,9 +53,8 @@ class Invoice:
         elif invoice["Departure"] > last_date and invoice["Arrival"]  <=  last_date :
             date_range.loc[0,"first date"] = invoice["Arrival"]
             date_range.loc[len(date_range)-1,"second date"] = date_range.loc[len(date_range)-1,"second date"]
+
             invoice["Arrival"] = last_date + timedelta(days=1)
-            if invoice["Departure"]  == invoice["Arrival"]:
-                date_range.loc[len(date_range)-1,"first date"] -= timedelta(days=1) 
             #invoice["Departure"] = invoice["Departure"] + timedelta(days=1)
 
             
@@ -72,8 +70,10 @@ class Invoice:
             contract_dict[contract_name] = Contract(contract_name, contract_data, contract_activity[contract_name])
         return contract_dict
 
-    def optimize_invoice_offers(self, index, invoice, contract_name, contract_object, date_range, last_day_removal=True):
+    def optimize_invoice_offers(self, index, invoice, contract_name, contract_object, date_range, arrival, departure, last_day_removal=True):
         
+        #if index == 0 and contract_name == "spo 21.12 to 14.01":
+            #print(invoice)
             
         if last_day_removal:
             date_range.loc[len(date_range)-1,"second date"] = date_range.loc[len(date_range)-1,"second date"] - pd.to_timedelta(1, unit='d')
@@ -82,7 +82,7 @@ class Invoice:
         date_range["longTerm"] = 0
         date_range["reduction1"] = 0
         date_range["reduction2"] = 0
-        date_range["Nights"] = (date_range["second date"] - date_range["first date"] + timedelta(days=1))
+        date_range["Nights"] = (date_range["second date"] - date_range["first date"]) + pd.to_timedelta(1, unit='d')
         date_range["price"] = (date_range["Nights"].dt.days * date_range[invoice["Rate code"]]).astype(float)
 
         
@@ -91,6 +91,8 @@ class Invoice:
         invoice["longTerm"] = 0
         invoice["reduction1"] = 0
         invoice["reduction2"] = 0
+        invoice["senior"] = 0
+        invoice["gd"] = 0
 
         # Offers
         if contract_object.EarlyBooking1["enable"]:
@@ -126,6 +128,32 @@ class Invoice:
             invoice["senior"] = ((invoice[contract_object.senior["column"]]/invoice["senior room type"]) * (contract_object.senior["percentage"]/100))
         date_range["senior"] = -(invoice["senior"] * date_range["price"])
 
+        if contract_object.GalaDinner["enable"]:
+            arrival_date = arrival.to_pydatetime()  # Converts to Python datetime
+            departure_date = departure
+
+            # Alternatively, if you want to use strptime, first convert the Timestamp to a string
+            # arrival_date = datetime.strptime(str(invoice["Arrival"]), "%Y-%m-%d")
+            # departure_date = datetime.strptime(str(invoice["Departure"]), "%Y-%m-%d")
+
+            # Normalize all dates to the same year
+            check_date = datetime.strptime("31-12", "%d-%m")
+            arrival_date_normalized = arrival_date.replace(year=2000)
+            departure_date_normalized = departure_date.replace(year=2000)
+            check_date = check_date.replace(year=2000)
+
+            # Handle cases where the departure spans over to the next year
+            if arrival_date_normalized > departure_date_normalized:
+                departure_date_normalized = departure_date_normalized.replace(year=2001)
+
+            # Check if 31/12 falls between the arrival and departure dates
+            is_in_range = arrival_date_normalized <= check_date <= departure_date_normalized
+            #print(is_in_range)
+
+            if is_in_range:
+                invoice["gd"] = ((invoice[contract_object.GalaDinner["column"]]*contract_object.GalaDinner["amount"]))
+        date_range["gd"] = invoice["gd"]
+
         date_range["price with offers"] = date_range["price"] + date_range["earlyBooking1"] + date_range["earlyBooking2"] + date_range["longTerm"]
         date_range["total price"] = date_range["price"] + date_range["earlyBooking1"] + date_range["earlyBooking2"] + date_range["longTerm"]
         date_range["total price"] = sum(date_range["total price"])
@@ -149,200 +177,195 @@ class Invoice:
 
     def invoicesMetrics(self):
         index_price_dict = {}
+        gd_dict = {}
         Index_contract_date_range_dict = {}
         for index, invoice in self.statment.iterrows():
-            contract_date_range_dict = {}
-            rate_code = invoice["Rate code"]
-            date_range = pd.DataFrame(columns=["first date","second date",])
-            #invoice["Departure"] = invoice["Departure"] - timedelta(days=1)
-            
-            if self.statment.loc[index,"activity"]:
-                while((invoice["Departure"]-invoice["Arrival"]).days != 0):
+            try:
+                self._process_invoice_row(index, invoice, index_price_dict, gd_dict, Index_contract_date_range_dict)
+            except Exception as e:
+                # A single unexpected row must not crash the whole run: flag it and keep going.
+                self.statment.loc[index, "activity"] = 0
+                if self.statment.loc[index, "error_type"]:
+                    self.statment.loc[index, "error_type"] += ", "
+                self.statment.loc[index, "error_type"] += f"processing error: {e}"
+                index_price_dict.pop(index, None)
+                gd_dict.pop(index, None)
+                Index_contract_date_range_dict.pop(index, None)
 
-                    for contract_name, contract_object in reversed(self.offers_dict.items()):
-                        if (invoice["Departure"]-invoice["Arrival"]).days == 0:
-                            break
+        for index, index_price in gd_dict.items():
+            if index in index_price_dict:
+                index_price_dict[index] += index_price
 
-
-                        self.contract_name = contract_name
-
-                        if (invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date) or contract_name == "contract":
-                            
-                            # contract not active
-                            if not(contract_object.activity):
-                                self.statment.loc[index,"activity"] = 0
-                                
-                                if (self.statment.loc[index,"error_type"]):
-                                    self.statment.loc[index,"error_type"] += ", "
-                                self.statment.loc[index,"error_type"] += f"error in it's spo ({contract_name})"
-                                
-                                break
-                            
-                            # rate code not in contract
-                            if not(invoice["Rate code"] in contract_object.contract_sheet.columns):
-                                
-                                self.statment.loc[index,"activity"] = 0
-                                
-                                if (self.statment.loc[index,"error_type"]):
-                                    self.statment.loc[index,"error_type"] += ", "
-                                self.statment.loc[index,"error_type"] += "error in rate code"
-                                
-                                break
-                            
-                            new_date_range,invoice, valid = self.oneContractDates(invoice,contract_object.contract_sheet,index)
-                            if new_date_range[invoice["Rate code"]].isna().any() or not(valid):
-                                continue
-
-                            date_range = pd.merge(date_range,new_date_range, how='outer')
-                            new_date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, new_date_range, False)
-                            
-                            contract_date_range_dict[contract_name] = new_date_range
-                            
-
-                            
-                            if ((invoice["Departure"]-invoice["Arrival"]).days == 0):
-                                date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, date_range, False)
-
-
-                                new_date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, date_range, False)
-                                #new_date_range["total price"] -= new_date_range[invoice["Rate code"]].iloc[-1]
-                                #new_date_range["Nights"].iloc[-1] = new_date_range["Nights"].iloc[-1] - pd.to_timedelta(1, unit='d')
-                                #new_date_range["total price"].iloc[-1] -= new_date_range["price"].iloc[-1]
-                                contract_date_range_dict[contract_name] = new_date_range
-                                
-                                Total_price = date_range["total price"][0] 
-                                #Total_price -= date_range[invoice["Rate code"]].iloc[-1]
-                                Index_contract_date_range_dict[index] = contract_date_range_dict
-                                
-                                index_price_dict[index] = Total_price
-                                continue
-                    
-
-
-                    if self.statment.loc[index,"activity"] != 0 and self.statment.loc[index,"error_type"] == "":
-                        try:
-                            index_price_dict[index] = Total_price - new_date_range[rate_code].iloc[-1]
-                        except:
-                            self.statment.loc[index,"error_type"] = "unexpected error"
-                            break
-
-                        new_date_range["Nights"].iloc[-1] = new_date_range["Nights"].iloc[-1] - pd.to_timedelta(1, unit='d')
-                        new_date_range["total price"].iloc[-1] -= new_date_range[rate_code].iloc[-1]
-                        new_date_range["price with offers"].iloc[-1] -= new_date_range[rate_code].iloc[-1]
-                        new_date_range["price"].iloc[-1] -= new_date_range[rate_code].iloc[-1]
-
-                        if not(index in index_price_dict) and self.statment.loc[index,"activity"] == 1:
-                            self.statment.loc[index,"error_type"] += "reservation date not valid"
-                            self.statment.loc[index,"activity"] = 0
-                        break
-                    else:
-                        break
-                
-
-                # by arrival
-                if (contract_object.sbi) and (invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date) and (invoice["Departure"] >= contract_object.contract_sheet["first date"][0] and invoice["Arrival"] <= contract_object.contract_sheet["second date"][-1]):
-                    
-                    date_range = contract_object.contract_sheet[(invoice["Arrival"] <= contract_object.contract_sheet["second date"]) & (invoice["Departure"] >= contract_object.contract_sheet["first date"])].reset_index(drop = True)
-                    
-                    index_price_dict[index] = (invoice["Departure"] - invoice["Arrival"]) - pd.Timedelta(days=1)
-                    
-                    
-                if self.statment.loc[index,"activity"] == 0:
-                    
-                    continue
-                    
+        #print(index_price_dict)
         return index_price_dict, Index_contract_date_range_dict, self.statment
 
+    def _process_invoice_row(self, index, invoice, index_price_dict, gd_dict, Index_contract_date_range_dict):
+        contract_date_range_dict = {}
+        rate_code = invoice["Rate code"]
+        date_range = pd.DataFrame(columns=["first date","second date",])
+        real_arr = invoice["Arrival"]
+        real_dep = invoice["Departure"]
+        invoice["Departure"] = invoice["Departure"] - timedelta(days=1) if not(invoice["Departure"] - timedelta(days=1) == invoice["Arrival"]) else invoice["Departure"]
+
+        # If the reservation was made before the earliest contract window opens,
+        # fall back to the base "contract" rates instead of rejecting the row.
+        # Clamping Res_date to the base contract's start lets the normal loop below
+        # match "contract" (and not any later S.P.O window).
+        base_contract = self.offers_dict.get("contract")
+        if base_contract is not None and "Res_date" in invoice.index and pd.notna(invoice["Res_date"]):
+            start_dates = [c.start_date for c in self.offers_dict.values() if c.start_date is not None]
+            if start_dates and invoice["Res_date"] < min(start_dates):
+                invoice["Res_date"] = base_contract.start_date
+
+        if self.statment.loc[index,"activity"]:
+            self.statment.loc[index,"error_type"]
+            while((invoice["Departure"]-invoice["Arrival"]).days != 0):
+
+                for contract_name, contract_object in reversed(self.offers_dict.items()):
+                    if (invoice["Departure"]-invoice["Arrival"]).days == 0:
+                        break
+                    self.contract_name = contract_name
+                    if index == 55:
+                        print(invoice["Res_date"])
+                        print(contract_object.start_date)
+                        print(contract_object.end_date)
+                        print("this inv")
+                    if "Res_date" not in list(invoice.index):
+                        print("HhhI")
+                        Index_contract_date_range_dict[index] = contract_date_range_dict
+
+                    if invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date:
+                        
+                        # contract not active
+                        
+                        if not(contract_object.activity):
+                            
+                            self.statment.loc[index,"activity"] = 0
+                            
+                            if (self.statment.loc[index,"error_type"]):
+                                self.statment.loc[index,"error_type"] += ", "
+                            self.statment.loc[index,"error_type"] += f"error in it's spo ({contract_name})"
+                            
+                            break
+                        
+                        # rate code not in contract
+                        if not(invoice["Rate code"] in contract_object.contract_sheet.columns):
+                            if index == 55: print(invoice["Rate code"])
+                            if index == 55: print(contract_object.contract_sheet.columns)
+                            if index == 55: print("wow")
+                            
+                            self.statment.loc[index,"activity"] = 0
+                            
+                            if (self.statment.loc[index,"error_type"]):
+                                self.statment.loc[index,"error_type"] += ", "
+                            self.statment.loc[index,"error_type"] += "error in rate code"
+                            
+                            break
+                        
+                        new_date_range,invoice, valid = self.oneContractDates(invoice,contract_object.contract_sheet,index)
+                        if new_date_range[invoice["Rate code"]].isna().any() or not(valid):
+                            continue
+
+                        date_range = pd.merge(date_range,new_date_range, how='outer')
+                        #if index == 2 and contract_name == "spo 24.11 to 24.11":
+                            #print(new_date_range)
+                        new_date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, new_date_range, real_arr, real_dep, False)
+                        
+                        contract_date_range_dict[contract_name] = new_date_range
+                        
+
+                        
+                        
+                        if ((invoice["Departure"]-invoice["Arrival"]).days == 0):
+                            date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, date_range, real_arr, real_dep, False)
 
 
-def get_offer_contract_data(offer_name):
-    conn = sqlite3.connect('setups.db')  # Update 'setups.db' with your actual database name
-    c = conn.cursor()
+                            new_date_range = self.optimize_invoice_offers(index, invoice, contract_name, contract_object, new_date_range, real_arr, real_dep, False)
+                            #new_date_range["total price"] -= new_date_range[invoice["Rate code"]].iloc[-1]
+                            #new_date_range["Nights"].iloc[-1] = new_date_range["Nights"].iloc[-1] - pd.to_timedelta(1, unit='d')
+                            contract_date_range_dict[contract_name] = new_date_range
+                            
+                            Total_price = date_range["total price"][0]
+                            #Total_price -= date_range[invoice["Rate code"]].iloc[-1]
+                            Index_contract_date_range_dict[index] = contract_date_range_dict
+                            
+                            index_price_dict[index] = Total_price
+                            if index == 2:
+                                #print(new_date_range)
+                                pass
+                            continue
+                
+                    # by arrival
+                    if (contract_object.sbi) and (invoice["Res_date"] >= contract_object.start_date and invoice["Res_date"] <= contract_object.end_date) and (invoice["Departure"] >= contract_object.contract_sheet["first date"][0] and invoice["Arrival"] <= contract_object.contract_sheet["second date"][-1]):
+                        
+                        date_range = contract_object.contract_sheet[(invoice["Arrival"] <= contract_object.contract_sheet["second date"]) & (invoice["Departure"] >= contract_object.contract_sheet["first date"])].reset_index(drop = True)
+                        
+                        index_price_dict[index] = (invoice["Departure"] - invoice["Arrival"]) - pd.Timedelta(days=1)
+                        
+                        
+                    if self.statment.loc[index,"activity"] == 0:
+                        
+                        continue
+
+                if not(index in index_price_dict) and self.statment.loc[index,"activity"] == 1:
+                    self.statment.loc[index,"error_type"] += "reservation date not valid"
+                    self.statment.loc[index,"activity"] = 0
+            
+
+                break
+
+        #print(Index_contract_date_range_dict[0])
+        if (real_dep - timedelta(days=1) == real_arr):
+            if index in Index_contract_date_range_dict and Index_contract_date_range_dict[index]:
+                index_price_dict[index] = next(iter(Index_contract_date_range_dict[index].values()))[rate_code][0]
+            elif self.statment.loc[index, "activity"] == 1:
+                if self.statment.loc[index, "error_type"]:
+                    self.statment.loc[index, "error_type"] += ", "
+                self.statment.loc[index, "error_type"] += "no matching contract for single-night stay"
+                self.statment.loc[index, "activity"] = 0
+        
+        if index in Index_contract_date_range_dict:
+            for df in Index_contract_date_range_dict[index].values():
+                target_date = pd.Timestamp("2024-12-31")
+                filtered_df = df[(df["first date"] <= target_date) & (df["second date"] >= target_date)]
+                if filtered_df.empty:
+                    pass
+                else:
+                    gd_dict[index] = filtered_df["gd"].iloc[0]
+                break
+
+
+                
+        # gd adder
+        #index_price_dict[index] += next(iter(Index_contract_date_range_dict[index].values()))["gd"][0] 
     
-    c.execute(f"SELECT * FROM {offer_name}")
-    rows = c.fetchall()
-    offer_contract_data = {}
-    for row in rows:
-        contract_data = {}
-        contract_data["contract_name"] = row[0]
-        contract_data["offer_name"] = row[1]
-        contract_data["offer_data"] = row[2]
-        
-        eb1 = {"enable": row[3], "percentage": row[4], "date": parse_date(row[5])}
-        eb2 = {"enable": row[6], "percentage": row[7], "date": parse_date(row[8])}
-        reduc1 = {"enable": row[9], "percentage": row[10], "column": row[11]}
-        reduc2 = {"enable": row[12], "percentage": row[13], "column": row[14]}
-        lt = {"enable": row[15], "percentage": row[16], "days": row[17]}
-        senior = {"enable": row[18], "percentage": row[19], "column": row[20]}
-        combinations = {"eb_lt": row[21], "eb_reduc": row[22], "eb_senior": row[23]}
-        start_date = parse_date(row[24])
-        end_date = parse_date(row[25])
-        sbi = row[26]
-        active = row[27]
-        
-        contract_data["earlyBooking1"] = eb1
-        contract_data["earlyBooking2"] = eb2
-        contract_data["reduction1"] = reduc1
-        contract_data["reduction2"] = reduc2
-        contract_data["longTerm"] = lt
-        contract_data["senior"] = senior
-        contract_data["combinations"] = combinations
-        contract_data["start_date"] = start_date
-        contract_data["end_date"] = end_date
-        contract_data["active"] = active
-        contract_data["sbi"] = sbi
-
-        offer_contract_data[contract_data['contract_name']] = contract_data
-
-    conn.close()
-    return offer_contract_data
-
-
-
-
-def parse_date(date_string):
-    if date_string:
-        # Define a list of possible date formats
-        date_formats = [
-            '%m/%d/%y', '%m-%d-%y', '%Y-%m-%d', '%d-%m-%Y',  # Various common formats
-            '%m/%d/%Y', '%m-%d-%Y', '%d-%m-%y', '%d/%m/%y',  # More variations
-            '%b %d, %Y', '%B %d, %Y',  # Month name abbreviations and full names
-            '%b %d %Y', '%B %d %Y', '%b. %d, %Y', '%B. %d, %Y',  # With or without dots after month abbreviation
-            '%d %b %Y', '%d %B %Y',  # Day and month swapped
-            '%Y/%m/%d', '%Y-%m-%d %H:%M:%S'  # ISO format with or without time
-        ]
-
-        # Try to match the date string with the regular expressions for the defined formats
-        for date_format in date_formats:
-            try:
-                parsed_date = pd.to_datetime(date_string, format=date_format)
-                return parsed_date
-            except ValueError:
-                continue
-
-        # If none of the formats matched, return None or handle the case as per your requirement
-        return None
-    return None
-
-
-
-
 
 
 
 if __name__ == "__main__":
+    from browse_frame import get_offer_contract_data
+    
     
     # Contract
     # FileUploader
-    file = FileUploader("test files/index Invo.xlsx")
-    setup_name = "Biblio_Siva_Golden"
-    values = get_offer_contract_data(setup_name)
-    offers_dict = {} 
+    is_offer_dict = False
+    file = FileUploader("test files/aug.xlsx")
+    contract_sheets = file.contracts_sheets
 
-    for contract_name, contract_data in file.contracts_sheets.items():
-        offers_dict[contract_name] = Contract(contract_name,contract_data,file.contracts_activity[contract_name],values[contract_name]["senior"],values[contract_name]["earlyBooking1"],values[contract_name]["earlyBooking2"],values[contract_name]["longTerm"],values[contract_name]["reduction1"],values[contract_name]["reduction2"],values[contract_name]["combinations"],values[contract_name]["start_date"],values[contract_name]["end_date"])
+    if is_offer_dict:
+        offers_dict = {}
+        values = get_offer_contract_data("JoinUp_Siva")
+        print(values.keys())
+        for contract_name, contract_data in file.contracts_sheets.items():
+            offers_dict[contract_name] = Contract(contract_name,contract_data,file.contracts_activity[contract_name],values[contract_name]["senior"],values[contract_name]["earlyBooking1"],values[contract_name]["earlyBooking2"],values[contract_name]["longTerm"],values[contract_name]["reduction1"],values[contract_name]["reduction2"],values[contract_name]["combinations"], values[contract_name]["gd"],values[contract_name]["start_date"],values[contract_name]["end_date"])
 
-    invoice_m = Invoice(file, offers_dict).metrices
+        invo = Invoice(file, offers_dict)
+        invoice_m = invo.metrices
+        invo_price = invo.prices
+    else:
+        invo = Invoice(file)
+        invoice_m = invo.metrices
+        invo_price = invo.prices
     invoice_dict = invoice_m[0]
 
     # Example DataFrame
@@ -352,7 +375,10 @@ if __name__ == "__main__":
     for key, value in invoice_dict.items():
         invoice_df["diff-hotel"].iloc[key] = invoice_df["Amount-hotel"].iloc[key] - value
 
-    # Printing the updated DataFrame
-    print(invoice_df["diff-hotel"])
+    invoice_df.loc[invoice_df["diff-hotel"] < 0.1, "diff-hotel"] = 0
 
+    # Printing the updated DataFrame
+#     print(invoice_df[invoice_df["diff-hotel"]>0])
+    print(invoice_df["diff-hotel"])
+    #print(invo_price)
 

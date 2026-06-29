@@ -7,6 +7,13 @@ from contract import Contract
 import warnings
 import os
 
+# Suppress SettingWithCopyWarning
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+warnings.filterwarnings("ignore", message=".*SettingWithCopyWarning.*")
+warnings.filterwarnings("ignore", message="Setting an item of incompatible dtype")
+
+# Suppress UserWarnings related to openpyxl
+warnings.filterwarnings("ignore", message="Data Validation extension is not supported and will be removed", category=UserWarning)
 # Clear the terminal
 
 warnings.filterwarnings("ignore", message="A value is trying to be set on a copy of a slice from a DataFrame.*")
@@ -31,6 +38,8 @@ class FileUploader:
         return excel_data
 
     def fix_empty(self, df, column):
+        df['activity'] = 1
+
         # get df that has empty rows
         df.loc[(df[column].isnull() | (df[column] == '')),column] = np.nan
 
@@ -38,7 +47,11 @@ class FileUploader:
         empty_rows = df[column].isna()
         
         # set activity of rows to 0
+
         df.loc[empty_rows, "activity"] = 0
+        if len(df[df['activity'] == 0]) >= 1:
+            df['error_type'] = ""
+
         if "error_type" in df.columns:
             # type error in error type column
             if not df.loc[empty_rows, "error_type"].empty:
@@ -49,7 +62,42 @@ class FileUploader:
 
     def fix_date(self, df_date_fix, column):
         # Detect and parse date format dynamically
-        try_formats = ['%Y-%m-%d %H:%M:%S', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%m-%d-%Y', '%Y-%d-%m', '%d-%m-%Y']
+        try_formats = [
+            # plain YMD / DMY / MDY (full year)
+            "%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+            "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",
+            "%m-%d-%Y", "%m/%d/%Y", "%m.%d.%Y",
+
+            # two-digit year variants
+            "%y-%m-%d", "%y/%m/%d", "%y.%m.%d",
+            "%d-%m-%y", "%d/%m/%y", "%d.%m.%y",
+            "%m-%d-%y", "%m/%d/%y", "%m.%d.%y",
+
+            # swapped Y/D order variants
+            "%Y-%d-%m", "%Y/%d/%m", "%Y.%d.%m",
+
+            # time (hours/min/sec/micro)
+            "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f",
+            "%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M:%S.%f",
+            "%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M:%S.%f",
+            "%m-%d-%Y %H:%M", "%m-%d-%Y %H:%M:%S", "%m-%d-%Y %H:%M:%S.%f",
+
+            # AM/PM forms
+            "%d-%m-%Y %I:%M %p", "%d/%m/%Y %I:%M %p", "%Y-%m-%d %I:%M %p",
+            "%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p",
+
+            # ISO T separators and timezones
+            "%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
+            "%Y-%m-%d %H:%M:%S%z", "%d/%m/%Y %H:%M:%S%z",
+
+            # month name variants
+            "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+            "%d %b %Y %H:%M:%S", "%d %B %Y %H:%M:%S",
+
+            # dotted forms with time
+            "%d.%m.%Y %H:%M:%S", "%m.%d.%Y %H:%M:%S"
+        ]
         df_date_fix["date_check"] = pd.NA
 
         def remove_dot(value):
@@ -146,19 +194,44 @@ class FileUploader:
         
         return df
     
+    def find_header_row(self, df, keywords):
+        """
+        Find the row index in a DataFrame that contains all specified keywords.
+
+        Parameters:
+        df (DataFrame): The DataFrame to search.
+        keywords (list of str): Keywords to identify the header row.
+
+        Returns:
+        int: The index of the header row, or -1 if no row matches.
+        """
+        for i, row in df.iterrows():
+            if all(keyword in row.values for keyword in keywords):
+                return i
+        return -1
+
     def check_statment(self, statment):
 
         if "Arrival" not in statment.iloc[0] or "Departure" not in statment.iloc[0]:
+            # Define the keywords to identify the header row
+            header_keywords = ["Arrival", "Departure"]
+
+            # Find the header row dynamically
+            header_row_index = self.find_header_row(statment, header_keywords)
 
             # Identify the row where the column names are located
-            header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
-
+            if header_row_index != -1:
+                # Reload the data with the located header row
+                #header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
+                statment = pd.read_excel(self.filepath, sheet_name="statment", header=header_row_index+1)
             # Use the identified row as the header
-            statment.columns = statment.iloc[header_row]
-            statment = statment.drop(header_row)
+            #header_row = statment[statment.apply(lambda row: row.notnull().all(), axis=1)].index[0]
+            #statment.columns = statment.iloc[header_row]
+            #statment = statment.drop(header_row)
 
             # Drop the null rows and reset the index
-            statment = statment.dropna().reset_index(drop=True)
+            #statment = statment.dropna().reset_index(drop=True)
+        
         
         statment = self.fix_empty(statment, "Rate code")
 
@@ -173,6 +246,8 @@ class FileUploader:
         # columns_numeric_to_fix = ["Amount-hotel","Currency rate","Departure"]
         # statment = self.fix_numbers(statment, columns_numeric_to_fix)
         
+        # Final cleanup: drop any row missing Arrival or Departure
+        statment.dropna(subset=["Arrival", "Departure"], inplace=True)
         return self.initialize_offers(statment)
 
     def check_contract(self, sheets):
@@ -242,6 +317,7 @@ class FileUploader:
 
     
 if __name__ == "__main__":
-    file = FileUploader("test files\Biblio- Resort 23-24 . Invo.xlsx")
+    file = FileUploader("test files/EXIM Al kasr August 25 test.xlsx")
     statment, contracts_sheets, contracts_activity = file.fix_file()
     print(statment)
+

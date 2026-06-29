@@ -10,9 +10,10 @@ class Contract:
     reduc2 = {"enable":False,"column":"","percentage":0}
     extra = {"enable":False,"amount":0}
     combinations = {"eb_lt":False,"eb_reduc":False,"eb_senior":False}
+    gd = {"enable":False,"column":"","amount":0}
     sbi = False
     
-    def __init__(self, contract_name, contract_sheet, activity, Senior=senior, EarlyBooking1=eb1, EarlyBooking2=eb2, LongTerm=lt, Reduction1=reduc1, Reduction2=reduc2, combinations=combinations, start_date=None, end_date=None, sbi=sbi):
+    def __init__(self, contract_name, contract_sheet, activity, Senior=senior, EarlyBooking1=eb1, EarlyBooking2=eb2, LongTerm=lt, Reduction1=reduc1, Reduction2=reduc2, combinations=combinations, GalaDinner=gd, start_date=None, end_date=None, sbi=sbi):
         
 
 
@@ -25,11 +26,16 @@ class Contract:
         self.Reduction1 = Reduction1
         self.Reduction2 = Reduction2
         self.combinations = combinations
+        self.GalaDinner = GalaDinner
         self.activity = activity
         self.sbi = sbi
         
-        self.start_date = start_date if start_date is not None else self.contract_sheet.loc[0,"first date"]
-        self.end_date = end_date if end_date is not None else self.contract_sheet.loc[len(contract_sheet)-1,"second date"]
+        start_date = start_date if start_date is not None else self.contract_sheet.loc[0,"first date"]
+        end_date = end_date if end_date is not None else self.contract_sheet.loc[len(contract_sheet)-1,"second date"]
+        # SQLite DATE columns come back as datetime.date, which newer pandas
+        # refuses to compare against Timestamp. Normalize both ends to Timestamp.
+        self.start_date = pd.Timestamp(start_date) if start_date is not None else None
+        self.end_date = pd.Timestamp(end_date) if end_date is not None else None
 
         self.contract_dictionary = {
                     "eb1": EarlyBooking1,
@@ -39,6 +45,7 @@ class Contract:
                     "reduc1": Reduction1,
                     "reduc2": Reduction2,
                     "combinations": combinations,
+                    "gd": GalaDinner,
                     "activity": activity,
                     "sbi": sbi
                 }    

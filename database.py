@@ -106,5 +106,3 @@ class ActivityTable():
 if __name__ == "__main__":
     at = ActivityTable()
     print(at.get_all_activities())
-    
-
