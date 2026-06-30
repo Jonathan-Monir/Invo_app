@@ -37,13 +37,15 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm INVO.spec
 
-      - name: Bundle data + assets next to the exe
+      - name: Stage the onefile exe with its external data
         run: |
-          Copy-Item -Path images    -Destination dist/INVO/images -Recurse -Force
-          Copy-Item -Path setups.db -Destination dist/INVO/setups.db -Force
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item -Path dist/INVO.exe -Destination package/INVO.exe -Force
+          Copy-Item -Path images        -Destination package/images -Recurse -Force
+          Copy-Item -Path setups.db     -Destination package/setups.db -Force
 
-      - name: Zip the app folder
-        run: Compress-Archive -Path dist/INVO/* -DestinationPath INVO-windows.zip -Force
+      - name: Zip the app
+        run: Compress-Archive -Path package/* -DestinationPath INVO-windows.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
