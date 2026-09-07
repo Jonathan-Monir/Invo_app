@@ -71,17 +71,19 @@ class FormatExcel:
         fill = PatternFill(start_color='ff4300', end_color='ff4300', fill_type='solid')
         fill_first_row = PatternFill(start_color='ffff00', end_color='ffff00', fill_type='solid')
 
-        # Find "Difference" column index
-        amount_col_index = None
-        for col_idx, col_name in enumerate(self.df.columns, start=1):
-            if col_name == "Difference":
-                amount_col_index = col_idx
-                break
+        # Highlight every difference column, dollar and Egyptian pound alike.
+        difference_columns = [
+            col_idx
+            for col_idx, col_name in enumerate(self.df.columns, start=1)
+            if col_name in ("Difference", "Difference EGP")
+        ]
 
-        if amount_col_index is not None:
+        for amount_col_index in difference_columns:
             for row_idx in range(2, len(self.df) + 2):
                 amount_cell = self.worksheet.cell(row=row_idx, column=amount_col_index)
-                if amount_cell.value != 0:
+                # A blank cell means no rate covered the row; leave it plain
+                # rather than flagging it as a price difference.
+                if amount_cell.value is not None and amount_cell.value != 0:
                     amount_cell.fill = fill
 
         # Change color of first row (headers)

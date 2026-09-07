@@ -19,6 +19,16 @@ import numpy as np  # Numerical operations library
 import warnings  # For suppressing warnings
 
 from format_excel import FormatExcel
+from egp_rates import (
+    EgpFrame,
+    ask_settings,
+    apply_egp,
+    order_egp_columns,
+    RATE_COLUMN,
+    CALCULATED_COLUMN,
+    HOTEL_COLUMN,
+    DIFFERENCE_COLUMN,
+)
 import tkinter as tk
 from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
@@ -200,8 +210,7 @@ class SetupContract(ttk.Frame):
         # --------------------------
         # Scrollable Canvas Setup
         # --------------------------
-        self.canvas = tk.Canvas(self, background="red", 
-                              scrollregion=(0, 0, self.winfo_width(), 20000))
+        self.canvas = tk.Canvas(self, background="#f0f0f0", highlightthickness=0)
         self.canvas.pack(expand=True, fill='both')
         
         # --------------------------
@@ -216,18 +225,26 @@ class SetupContract(ttk.Frame):
         # Content Initialization
         # --------------------------
         self.contract_setting = ContractSetting(self)
+        # Placed once, then resized in place; see Apply.update_size for why.
+        self.content_id = self.canvas.create_window(
+            (0, 0), window=self.contract_setting, anchor='nw'
+        )
         
         # --------------------------
         # Event Bindings
         # --------------------------
         self.canvas.bind_all('<MouseWheel>', lambda event: 
                            self.canvas.yview_scroll(-int(event.delta / 60), 'units'))
-        self.bind('<Configure>', self.update_size)
+        self.canvas.bind('<Configure>', self.update_size)
+        self.contract_setting.bind('<Configure>', self.update_scrollregion)
 
     def update_size(self, event):
-        """Handle window resize events to maintain proper canvas dimensions."""
-        self.canvas.create_window((-1, 0), window=self.contract_setting, 
-                                anchor='nw', width=self.winfo_width(), height=20000)
+        """Keep the content as wide as the canvas, minus the scrollbar."""
+        self.canvas.itemconfigure(self.content_id, width=event.width - 18)
+        self.update_scrollregion()
+
+    def update_scrollregion(self, event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 class DotDict:
     """Dictionary wrapper allowing attribute-style access to keys."""
@@ -257,7 +274,7 @@ class ContractSetting(ttk.Frame):
             parent: Parent widget container
         """
         super().__init__(parent)
-        self.pack(expand=True, fill='both')
+        # Placed on the parent's canvas with create_window; no pack() here.
         self.name_contract_dict = {contract.filename: contract for contract in container}
         self.current_file = None
 
@@ -1059,22 +1076,33 @@ class Apply(ttk.Frame):
         super().__init__(parent)
         self.pack(expand=True, fill="both")
 
-        self.canvas = tk.Canvas(self, background="red", scrollregion=(0,0,self.winfo_width(),20000))
+        self.canvas = tk.Canvas(self, background="#f0f0f0", highlightthickness=0)
         self.canvas.pack(expand=True, fill='both')
 
         self.apply_setup = ApplySetup(self)
-        # self.canvas.create_window((-1,0), window = self.ApplySetup, anchor='nw', width=self.winfo_width(), height=20000)
-        
+        # The content is placed on the canvas once. Re-creating it on every
+        # <Configure> stacks a new window each resize, and a fixed height (the
+        # old 20000) centres the content in a giant box; instead the window is
+        # resized in place and the scroll region follows the real content height.
+        self.content_id = self.canvas.create_window(
+            (8, 8), window=self.apply_setup, anchor='nw'
+        )
 
         self.scrollbar = ttk.Scrollbar(self, orient= "vertical",command=self.canvas.yview)
         self.scrollbar.place(relx=1,rely=0,relheight=1,anchor='ne')
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         # events
         self.canvas.bind_all('<MouseWheel>', lambda event: self.canvas.yview_scroll(-int(event.delta / 60),'units'))
-        self.bind('<Configure>', self.update_size)
+        self.canvas.bind('<Configure>', self.update_size)
+        self.apply_setup.bind('<Configure>', self.update_scrollregion)
 
     def update_size(self, event):
-        self.canvas.create_window((-1,0), window = self.apply_setup, anchor='nw', width=self.winfo_width(), height=20000)
+        # Match the content width to the canvas, leaving room for the scrollbar.
+        self.canvas.itemconfigure(self.content_id, width=max(event.width - 34, 1))
+        self.update_scrollregion()
+
+    def update_scrollregion(self, event=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
 
 
@@ -1083,9 +1111,9 @@ class ApplySetup(ttk.Frame):
     def __init__(self,parent):
         super().__init__(parent)
 
+        # No pack() here: this frame is placed on the parent's canvas with
+        # create_window, and packing it as well fights that placement.
 
-        self.pack(expand=True,fill='both')
-        
         if not container:
             
             tk.Label(self, text="Please choose a file to make the setup", font=("Helvetica", 24)).grid(row=0, column=0, sticky="w", padx=0, pady=0)
@@ -1098,15 +1126,23 @@ class ApplySetup(ttk.Frame):
             
             self.file_setup_dict = {}
             self.setup_box = {}
+            self.egp_frames = {}
+            grid_row = 1
             for file_index in range(len(container)):
-                tk.Label(self, text=container[file_index].filename, font=("Helvetica", 10, "underline")).grid(row=1+file_index, column=0, sticky="w", padx=0, pady=0)
-                self.setup_box[container[file_index]] = ttk.Combobox(self, values=list(self.tables.keys()))
-                self.setup_box[container[file_index]].grid(row=1+file_index, column=1, sticky="w", padx=0, pady=0)
-                
+                file = container[file_index]
+                tk.Label(self, text=file.filename, font=("Helvetica", 10, "underline")).grid(row=grid_row, column=0, sticky="w", padx=0, pady=0)
+                self.setup_box[file] = ttk.Combobox(self, values=list(self.tables.keys()))
+                self.setup_box[file].grid(row=grid_row, column=1, sticky="w", padx=0, pady=0)
+                grid_row += 1
+
+                # Egyptian pound review menu for this file.
+                self.egp_frames[file] = EgpFrame(self, list(file.statment.columns))
+                self.egp_frames[file].grid(row=grid_row, column=0, columnspan=2, sticky="w", padx=10, pady=(2, 8))
+                grid_row += 1
 
             # Button
             self.submit_button = tk.Button(self, text="Submit", command=self.submit)
-            self.submit_button.grid(columnspan=2, pady=10)
+            self.submit_button.grid(row=grid_row, columnspan=2, pady=10)
 
     def format_table_data(self, table_data):
         # Calculate the maximum width for each column
@@ -1132,6 +1168,17 @@ class ApplySetup(ttk.Frame):
         return f"{headers}\n{rows}"
 
     def submit(self):
+        # Read and validate every file's EGP settings first, so an invalid rate
+        # period cannot leave some files exported and others not.
+        egp_settings = {}
+        for file in self.setup_box:
+            settings = ask_settings(self.egp_frames[file], file.filename)
+            if settings is None:
+                return
+            egp_settings[file] = settings
+
+        unmatched_report = []
+
         for file, setup in self.setup_box.items():
 
             offers_dict = {}
@@ -1190,6 +1237,14 @@ class ApplySetup(ttk.Frame):
                 statment["Difference"] = statment["Total price"] - statment["Amount-hotel"]
                 
                 DifferenceTable(self, statment, file.filename).grid()
+
+            # Egyptian pound review: convert Total price with the rate covering
+            # each row's Departure date, and check it against the hotel's own
+            # EGP amount when the file already has one.
+            settings = egp_settings[file]
+            unmatched = apply_egp(statment, settings)
+            if unmatched:
+                unmatched_report.append((file.filename, unmatched))
             
             # cols_to_drop = statment.columns[~(statment != 0).any()]
             # columns_to_keep = ['Difference']
@@ -1224,6 +1279,9 @@ class ApplySetup(ttk.Frame):
                 cols.insert(cols.index("Difference"), "Amount-hotel")  # Insert before "Difference"
                 cols.insert(cols.index("Difference"), "Total price")   # Insert before "Difference"
 
+            if settings.enabled:
+                cols = order_egp_columns(cols, HOTEL_COLUMN in statment.columns)
+
             statment = statment[cols]
             # Check if 'difference' column exists before modifying
             if 'Difference' in statment.columns:
@@ -1233,6 +1291,17 @@ class ApplySetup(ttk.Frame):
                 statment['Booking No.'] = statment['Booking No.'].apply(lambda x: int(x))
 
             FormatExcel(statment, output_path)
+
+        if unmatched_report:
+            lines = "\n".join(
+                f"{filename}: {count} row(s)" for filename, count in unmatched_report
+            )
+            messagebox.showwarning(
+                "Egyptian pound rates",
+                "Some rows have a Departure date that falls in none of the rate "
+                "periods you entered. Their Egyptian pound cells were left "
+                f"empty.\n\n{lines}",
+            )
 
 def get_tables():
     db_file = 'setups.db'
