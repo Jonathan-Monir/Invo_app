@@ -32,7 +32,7 @@ REM --- 3) Clean previous build output ----------------------------------------
 if exist build rmdir /s /q build
 if exist dist  rmdir /s /q dist
 
-REM --- 4) Build (onedir) using the spec --------------------------------------
+REM --- 4) Build (onefile) using the spec ------------------------------------
 pyinstaller --noconfirm INVO.spec
 if errorlevel 1 (
     echo ERROR: PyInstaller build failed.
@@ -40,17 +40,23 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM --- 5) Ship writable data + assets NEXT TO the exe ------------------------
-REM These are resolved at runtime relative to INVO.exe (see resource_path).
-xcopy /e /i /y images "dist\INVO\images" >nul
-copy /y setups.db "dist\INVO\setups.db" >nul
+REM --- 5) Stage the single exe with its external data -----------------------
+REM Onefile output is dist\INVO.exe (one file). images\ and setups.db ship
+REM NEXT TO it; they are resolved at runtime relative to INVO.exe.
+if exist package rmdir /s /q package
+mkdir package
+copy /y dist\INVO.exe "package\INVO.exe" >nul
+xcopy /e /i /y images "package\images" >nul
+copy /y setups.db "package\setups.db" >nul
 
 echo.
 echo ============================================================
 echo  Build complete.
-echo  App folder : dist\INVO\
-echo  Run        : dist\INVO\INVO.exe  (double-click)
-echo  Distribute : zip the whole  dist\INVO  folder and send it.
+echo  App folder : package\   (INVO.exe + images\ + setups.db)
+echo  Run        : package\INVO.exe  (double-click)
+echo  Distribute : zip the contents of  package\  and send it.
+echo               Your father just needs INVO.exe, images\ and
+echo               setups.db together in one folder -- no _internal.
 echo ============================================================
 pause
 endlocal
