@@ -1,0 +1,22 @@
+# Packaged builds and PyInstaller output
+apps/
+build/
+dist/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Visual Studio local workspace state
+.vs/
+
+# LibreOffice / Excel lock and scratch files
+.~lock.*#
+~$*
+
+# Generated spreadsheets (test fixtures under "test files/" stay tracked)
+/output/*.xlsx
+/formatted_output.xlsx
+
+# Stray archives
+image.zip
