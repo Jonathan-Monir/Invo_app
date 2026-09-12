@@ -1233,18 +1233,19 @@ class ApplySetup(ttk.Frame):
                     
                 statment.loc[date, "calculations"] = result
                 
-            if "Amount-hotel" in statment.columns:
-                statment["Difference"] = statment["Total price"] - statment["Amount-hotel"]
-                
-                DifferenceTable(self, statment, file.filename).grid()
-
             # Egyptian pound review: convert Total price with the rate covering
             # each row's Departure date, and check it against the hotel's own
-            # EGP amount when the file already has one.
+            # EGP amount when the file already has one. Done before the review
+            # table is built so the table can show the pound columns too.
             settings = egp_settings[file]
             unmatched = apply_egp(statment, settings)
             if unmatched:
                 unmatched_report.append((file.filename, unmatched))
+
+            if "Amount-hotel" in statment.columns:
+                statment["Difference"] = statment["Total price"] - statment["Amount-hotel"]
+                
+                DifferenceTable(self, statment, file.filename).grid()
             
             # cols_to_drop = statment.columns[~(statment != 0).any()]
             # columns_to_keep = ['Difference']
@@ -1448,17 +1449,38 @@ class DifferenceTable(ttk.Frame):
         if "Invoice No." in statment.columns:
             statment["Invoice No."] = statment["Invoice No."].astype("Int64")
 
-        # Format 'Difference' column to avoid scientific notation
-        if "Difference" in statment.columns:
-            statment["Difference"] = statment["Difference"].apply(lambda x: f"{x:.2f}")
+        # Format the difference columns to avoid scientific notation. Blanks
+        # (a row no rate period covered) stay blank rather than reading "nan".
+        def as_text(value):
+            return "" if pd.isna(value) else f"{value:.2f}"
+
+        for column in ("Difference", DIFFERENCE_COLUMN):
+            if column in statment.columns:
+                statment[column] = statment[column].apply(as_text)
+
         columns_to_review = ["Amount-hotel","Total price","Difference"]
+
+        # Show the Egyptian pound amounts next to the dollar ones when the
+        # pound review was enabled for this file.
+        egp_columns = [
+            column
+            for column in (CALCULATED_COLUMN, HOTEL_COLUMN, DIFFERENCE_COLUMN)
+            if column in statment.columns
+        ]
+        columns_to_review += egp_columns
+
         if "Invoice No." in statment:
             columns_to_review.append("Invoice No.")
 
         elif "Folio" in statment:
             columns_to_review.append("Folio")
 
-        difference_table = statment[statment['Difference'] != "0.00"][columns_to_review]
+        # A row is worth reviewing when either currency disagrees.
+        mismatched = statment["Difference"] != "0.00"
+        if DIFFERENCE_COLUMN in statment.columns:
+            mismatched |= ~statment[DIFFERENCE_COLUMN].isin(["0.00", ""])
+
+        difference_table = statment[mismatched][columns_to_review]
 
         # pandastable's getlongestEntry does c.str.len().max(); a real NaN left in
         # a column keeps that result as numpy.float64, which later blows up
