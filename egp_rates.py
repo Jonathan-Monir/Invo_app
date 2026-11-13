@@ -14,8 +14,12 @@ never matches two rates. Entering 17/4-23/4 followed by 23/4-28/4 is rejected
 with a message asking for 24/4, rather than silently picking a winner.
 """
 
+import json
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
+from pathlib import Path
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -30,6 +34,58 @@ DIFFERENCE_COLUMN = "Difference EGP"
 
 # The statement column whose date decides which rate period a row falls in.
 DATE_COLUMN = "Departure"
+SHARED_SETTINGS_KEY = "__shared_egp_settings__"
+
+
+def _settings_file():
+    """Return the per-user file used to remember EGP review choices."""
+    if os.name == "nt":
+        root = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    else:
+        root = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return root / "INVO" / "egp_settings.json"
+
+
+def _load_egp_settings(settings_key):
+    try:
+        with _settings_file().open("r", encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+        saved_files = settings.get("files", {})
+        if not isinstance(saved_files, dict):
+            return None
+        if settings_key in saved_files:
+            return saved_files[settings_key]
+        # Migrate settings saved by older versions, which kept one entry per
+        # input path, into the new shared EGP configuration.
+        if settings_key == SHARED_SETTINGS_KEY and saved_files:
+            return list(saved_files.values())[-1]
+        return None
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
+def _store_egp_settings(settings_key, saved_settings):
+    path = _settings_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("r", encoding="utf-8") as settings_file:
+            settings = json.load(settings_file)
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+
+    if not isinstance(settings, dict):
+        settings = {}
+    files = settings.setdefault("files", {})
+    if not isinstance(files, dict):
+        files = {}
+        settings["files"] = files
+    files[settings_key] = saved_settings
+
+    temporary_path = path.with_suffix(".tmp")
+    temporary_path.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(temporary_path, path)
 
 
 class RateError(Exception):
@@ -200,8 +256,11 @@ class EgpFrame(ttk.LabelFrame):
 
     CREATE_CHOICE = "Create the EGP column"
 
-    def __init__(self, parent, statment_columns):
+    def __init__(self, parent, statment_columns, settings_id=None, filename=None):
         super().__init__(parent, text="Amount in Egyptian pounds")
+        self.filename = filename or str(settings_id or "this file")
+        self.settings_key = SHARED_SETTINGS_KEY
+        self._save_error_shown = False
 
         # Any numeric-looking column that is not one we produce ourselves is a
         # candidate for the hotel's own EGP amount.
@@ -211,7 +270,12 @@ class EgpFrame(ttk.LabelFrame):
             if column not in (RATE_COLUMN, CALCULATED_COLUMN, DIFFERENCE_COLUMN)
         ]
 
-        self.enabled = tk.BooleanVar(value=False)
+        saved_settings = _load_egp_settings(self.settings_key)
+        self.enabled = tk.BooleanVar(
+            value=bool(saved_settings.get("enabled", False))
+            if isinstance(saved_settings, dict)
+            else False
+        )
         self.enable_check = ttk.Checkbutton(
             self,
             text="Review the amount in Egyptian pounds",
@@ -232,8 +296,16 @@ class EgpFrame(ttk.LabelFrame):
             state="readonly",
             width=28,
         )
-        self.column_box.set(self._guess_column())
+        saved_column = (
+            saved_settings.get("hotel_column")
+            if isinstance(saved_settings, dict)
+            else None
+        )
+        if saved_column is None:
+            saved_column = self._guess_column()
+        self.column_box.set(saved_column)
         self.column_box.grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        self.column_box.bind("<<ComboboxSelected>>", self._save_settings)
 
         ttk.Label(
             self.body,
@@ -254,8 +326,25 @@ class EgpFrame(ttk.LabelFrame):
         )
         self.add_button.grid(row=3, column=0, sticky="w", pady=4)
 
-        self.add_period()
-        self._toggle()
+        self.reset_button = ttk.Button(
+            self.body, text="Reset", command=self.reset_periods
+        )
+        self.reset_button.grid(row=3, column=1, sticky="w", padx=5, pady=4)
+
+        saved_periods = (
+            saved_settings.get("periods")
+            if isinstance(saved_settings, dict)
+            else None
+        )
+        if not isinstance(saved_periods, list):
+            saved_periods = None
+        if saved_periods is None:
+            self.add_period(save=False)
+        else:
+            for period in saved_periods:
+                if isinstance(period, dict):
+                    self.add_period(period=period, save=False)
+        self._toggle(save=False)
 
     def _guess_column(self):
         """Pre-select a column that looks like an EGP amount, if there is one."""
@@ -265,7 +354,7 @@ class EgpFrame(ttk.LabelFrame):
                 return column
         return self.CREATE_CHOICE
 
-    def _toggle(self):
+    def _toggle(self, save=True):
         state = "normal" if self.enabled.get() else "disabled"
         self.column_box.configure(state="readonly" if self.enabled.get() else "disabled")
         self.add_button.configure(state=state)
@@ -277,24 +366,90 @@ class EgpFrame(ttk.LabelFrame):
                 row.remove_button,
             ):
                 widget.configure(state=state)
+        if save:
+            self._save_settings()
 
-    def add_period(self):
+    def add_period(self, period=None, save=True):
         row = _PeriodRow(self.periods_frame, len(self.rows) + 1, self.remove_period)
+        if period:
+            try:
+                row.from_entry.set_date(date.fromisoformat(period.get("from", "")))
+                row.to_entry.set_date(date.fromisoformat(period.get("to", "")))
+            except (TypeError, ValueError):
+                pass
+            row.rate_entry.insert(0, str(period.get("rate", "")))
+        row.from_entry.bind("<<DateEntrySelected>>", self._save_settings)
+        row.from_entry.bind("<FocusOut>", self._save_settings)
+        row.to_entry.bind("<<DateEntrySelected>>", self._save_settings)
+        row.to_entry.bind("<FocusOut>", self._save_settings)
+        row.rate_entry.bind("<KeyRelease>", self._save_settings)
+        row.rate_entry.bind("<FocusOut>", self._save_settings)
         self.rows.append(row)
-        self._toggle()
+        self._toggle(save=save)
 
     def remove_period(self, row):
         if len(self.rows) == 1:
             # Keep one line on screen so the menu never looks broken.
             row.rate_entry.delete(0, tk.END)
+            self._save_settings()
             return
         row.destroy()
         self.rows.remove(row)
         for row_index, remaining in enumerate(self.rows, start=1):
             remaining.grid(row_index)
+        self._save_settings()
+
+    def reset_periods(self):
+        """Remove every rate period after the user confirms the reset."""
+        confirmed = messagebox.askyesno(
+            "Reset Egyptian pound periods",
+            f"Remove all rate periods for {self.filename}?",
+            parent=self.winfo_toplevel(),
+        )
+        if not confirmed:
+            return
+        for row in self.rows:
+            row.destroy()
+        self.rows.clear()
+        self._save_settings()
+
+    def _save_settings(self, _event=None):
+        """Remember the current controls as they are edited."""
+        periods = []
+        for row in self.rows:
+            try:
+                start = row.from_entry.get_date().isoformat()
+                end = row.to_entry.get_date().isoformat()
+            except (ValueError, TypeError):
+                # DateEntry can temporarily contain a partially typed date.
+                start = row.from_entry.get()
+                end = row.to_entry.get()
+            periods.append({
+                "from": start,
+                "to": end,
+                "rate": row.rate_entry.get().strip(),
+            })
+
+        settings = {
+            "enabled": bool(self.enabled.get()),
+            "hotel_column": self.column_box.get(),
+            "periods": periods,
+        }
+        try:
+            _store_egp_settings(self.settings_key, settings)
+            self._save_error_shown = False
+        except OSError as error:
+            if not self._save_error_shown:
+                messagebox.showerror(
+                    "Could not save Egyptian pound settings",
+                    f"The settings could not be saved for next time.\n\n{error}",
+                    parent=self.winfo_toplevel(),
+                )
+                self._save_error_shown = True
 
     def get_settings(self):
         """The chosen settings, or raise :class:`RateError` if they are invalid."""
+        self._save_settings()
         if not self.enabled.get():
             return EgpSettings(enabled=False, rate_periods=None)
 
