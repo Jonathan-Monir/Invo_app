@@ -1136,7 +1136,12 @@ class ApplySetup(ttk.Frame):
                 grid_row += 1
 
                 # Egyptian pound review menu for this file.
-                self.egp_frames[file] = EgpFrame(self, list(file.statment.columns))
+                self.egp_frames[file] = EgpFrame(
+                    self,
+                    list(file.statment.columns),
+                    settings_id=file.filepath,
+                    filename=file.filename,
+                )
                 self.egp_frames[file].grid(row=grid_row, column=0, columnspan=2, sticky="w", padx=10, pady=(2, 8))
                 grid_row += 1
 
